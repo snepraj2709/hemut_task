@@ -18,7 +18,7 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }: RegisterPageProps) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError('');
 
     if (!username.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
@@ -42,10 +42,10 @@ const RegisterPage = ({ onRegister, onSwitchToLogin }: RegisterPageProps) => {
     }
 
     try {
-      const user = backend.register(username, email, password);
+      const user = await backend.register(username, email, password);
       onRegister(user);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Registration failed");
     }
   };
 

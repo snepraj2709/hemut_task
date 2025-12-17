@@ -22,152 +22,201 @@ export interface Answer {
   timestamp: string;
 }
 
-// Mock Backend API (simulating FastAPI + WebSocket + Database)
-export class MockBackend {
-  questions: Question[];
-  users: any[]; // Keeping generic for now to match looseness of original, or better strictness
-  nextQuestionId: number;
-  nextUserId: number;
-  wsListeners: ((message: any) => void)[];
-  webhookUrl: string;
+class Backend {
+  baseUrl: string;
+  private token: string | null = null;
+  private wsListeners: ((message: any) => void)[] = [];
+  private pollingInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.questions = [];
-    this.users = [
-      { user_id: 1, username: 'admin', email: 'admin@example.com', password: 'admin123', is_admin: true }
-    ];
-    this.nextQuestionId = 1;
-    this.nextUserId = 2;
-    this.wsListeners = [];
-    this.webhookUrl = 'https://webhook.site/mock-endpoint';
-  }
-
-  // User Management
-  register(username: string, email: string, password: string) {
-    if (this.users.find(u => u.username === username || u.email === email)) {
-      throw new Error('User already exists');
+    let url = process.env.BACKEND_BASE_URL || 'http://13.203.220.208:8000';
+    // Sanitize URL: remove trailing slash if present
+    if (url.endsWith('/')) {
+      url = url.slice(0, -1);
     }
-    const user = {
-      user_id: this.nextUserId++,
-      username,
-      email,
-      password,
-      is_admin: false
-    };
-    this.users.push(user);
-    return { user_id: user.user_id, username: user.username, is_admin: user.is_admin };
-  }
+    this.baseUrl = url;
 
-  login(username: string, password: string) {
-    const user = this.users.find(u => u.username === username && u.password === password);
-    if (!user) {
-      throw new Error('Invalid credentials');
+    // Load token from storage if available
+    if (typeof window !== 'undefined') {
+      this.token = localStorage.getItem('access_token');
     }
-    return { user_id: user.user_id, username: user.username, is_admin: user.is_admin };
   }
 
-  // Questions Management
-  submitQuestion(message: string, userId: number | null = null) {
-    const question: Question = {
-      question_id: this.nextQuestionId++,
-      user_id: userId,
-      message,
-      status: 'Pending',
-      timestamp: new Date().toISOString(),
-      answers: []
+  // --- Auth Helpers ---
+  private getHeaders() {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
     };
-    this.questions.push(question);
-    this.broadcastToWebSocket({ type: 'new_question', data: question });
-    return question;
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    return headers;
   }
 
-  getQuestions() {
-    return [...this.questions].sort((a, b) => {
-      // Sort priority: Escalated > Pending > Answered, then by time
-      const score = (status:string) => {
-        if (status === 'Escalated') return 3;
-        if (status === 'Pending') return 2;
-        return 1;
-      };
-      
-      const scoreA = score(a.status);
-      const scoreB = score(b.status);
-      
-      if (scoreA !== scoreB) return scoreB - scoreA;
-      
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  private async fetchAPI(endpoint: string, options: RequestInit = {}) {
+    // endpoint should start with /
+    const url = `${this.baseUrl}${endpoint}`;
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        ...this.getHeaders(),
+        ...options.headers,
+      },
+    });
+
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.detail?.msg || data.detail || 'API Error');
+    }
+    return data;
+  }
+
+  // --- User Management ---
+  
+  async register(username: string, email: string, password: string) {
+    // /api/auth/register
+    const data = await this.fetchAPI('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, email, password }),
+    });
+    // Expected response might be { access_token: ..., user: ... } or similar.
+    // Based on docs: TokenResponse -> access_token, token_type, user
+    if (data.access_token) {
+      this.setToken(data.access_token);
+    }
+    return data.user;
+  }
+
+  async login(username: string, password: string) {
+    // /api/auth/login
+    const data = await this.fetchAPI('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    if (data.access_token) {
+      this.setToken(data.access_token);
+    }
+    return data.user;
+  }
+
+  logout() {
+    this.token = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('access_token');
+    }
+  }
+
+  setToken(token: string) {
+    this.token = token;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('access_token', token);
+    }
+  }
+
+  getUser() {
+    // Decode token or fetch /api/auth/me? For now, we rely on the object returned during login/register
+    // But if page reloads, we might want to fetch me.
+    // Implementing a quick me check:
+    return this.fetchAPI('/api/auth/me').catch(() => null);
+  }
+
+  // --- Question Management ---
+
+  async getQuestions(): Promise<Question[]> {
+    return this.fetchAPI('/api/questions');
+  }
+
+  async submitQuestion(message: string, userId: number | null = null) {
+    // POST /api/questions
+    // Request body: QuestionSubmit { message: string }
+    // Note: userId is inferred from token if logged in. If guest, API handles it? 
+    // Docs say "Submit a new question (guests allowed - user is Optional)" 
+    // We send message. The backend likely infers user from token.
+    return this.fetchAPI('/api/questions', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
     });
   }
 
-  markAnswered(questionId: number) {
-    const question = this.questions.find(q => q.question_id === questionId);
-    if (question) {
-      question.status = 'Answered';
-      this.broadcastToWebSocket({ type: 'question_updated', data: question });
-      this.triggerWebhook(question);
-      return question;
-    }
-    throw new Error('Question not found');
+  async addAnswer(questionId: number, answer: string, userId: number | null = null) {
+    // POST /api/questions/{question_id}/answers
+    // Body: AnswerSubmit { message: string }
+    return this.fetchAPI(`/api/questions/${questionId}/answers`, {
+      method: 'POST',
+      body: JSON.stringify({ message: answer }),
+    });
   }
 
-  escalateQuestion(questionId: number) {
-    const question = this.questions.find(q => q.question_id === questionId);
-    if (question) {
-      question.status = 'Escalated';
-      this.broadcastToWebSocket({ type: 'question_updated', data: question });
-      return question;
-    }
-    throw new Error('Question not found');
+  async markAnswered(questionId: number) {
+    // PUT /api/questions/{question_id}/mark-answered
+    return this.fetchAPI(`/api/questions/${questionId}/mark-answered`, {
+      method: 'PUT',
+    });
   }
 
-  addAnswer(questionId: number, answer: string, userId: number | null = null) {
-    const question = this.questions.find(q => q.question_id === questionId);
-    if (question) {
-      question.answers.push({
-        answer_id: Date.now(),
-        user_id: userId,
-        message: answer,
-        timestamp: new Date().toISOString()
-      });
-      this.broadcastToWebSocket({ type: 'question_updated', data: question });
-      return question;
-    }
-    throw new Error('Question not found');
+  async escalateQuestion(questionId: number) {
+    // PUT /api/questions/{question_id}/escalate
+    return this.fetchAPI(`/api/questions/${questionId}/escalate`, {
+      method: 'PUT',
+    });
   }
 
-  // RAG/Langchain Mock Integration
-  async generateAISuggestion(message: string) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const suggestions = [
-      "Based on similar queries, you might want to check our documentation at docs.example.com",
-      "This appears to be a technical issue. Have you tried restarting the service?",
-      "For account-related questions, please verify your email is confirmed.",
-      "This is a common question. The answer typically involves checking your settings first."
-    ];
-    return suggestions[Math.floor(Math.random() * suggestions.length)];
+  async generateAISuggestion(questionId: number) {
+     // original prototype was generateAISuggestion(message) but real API is by ID
+     // POST /api/questions/{question_id}/ai-suggest
+     // The response structure isn't fully detailed in plan but we'll assume it returns the suggestion or void?
+     // Docs say "Get Ai Suggestion ... responses 200 {}".
+     // If it returns void, maybe it updates the question or returns the answer text?
+     // I'll assume it might return result. If not, I'll log it.
+     // Let's assume the API returns the suggestion string or object.
+     return this.fetchAPI(`/api/questions/${questionId}/ai-suggest`, {
+       method: 'POST'
+     });
   }
 
-  // WebSocket Simulation
+  // --- WebSocket / Real-time Simulation ---
+
   addWebSocketListener(callback: (message: any) => void) {
     this.wsListeners.push(callback);
+    
+    // Start polling if not already started
+    if (!this.pollingInterval) {
+      this.pollingInterval = setInterval(async () => {
+        try {
+          // In a real WS, we get delta updates. Here we might just signal "refresh needed"
+          // Or we fetch questions and compare?
+          // Simplest for now: Just signal 'new_question' or 'update' generically to force re-fetch
+          // But that causes infinite re-renders if not careful. 
+          // Better approach: The component calls getQuestions(), we just want to tell it "hey, update available".
+          // Let's indiscriminately notify every 10s?
+          // Or just poll silently?
+          // Actually, the component calls addWebSocketListener and then expects messages like { type: 'new_question' }.
+          // Let's simulate a heartbeat that says "check_updates".
+          // The current component logic:
+          // if (message.type === 'new_question') setQuestions(...)
+          // if (message.type === 'question_updated') setQuestions(...)
+          
+          // So we can simply trigger these events every few seconds to force a refresh.
+          this.broadcastToWebSocket({ type: 'question_updated' }); 
+        } catch (e) {
+          console.error("Polling error", e);
+        }
+      }, 5000); // 5 seconds poll
+    }
+
     return () => {
       this.wsListeners = this.wsListeners.filter(cb => cb !== callback);
+      if (this.wsListeners.length === 0 && this.pollingInterval) {
+        clearInterval(this.pollingInterval);
+        this.pollingInterval = null;
+      }
     };
   }
 
-  broadcastToWebSocket(message: any) {
+  private broadcastToWebSocket(message: any) {
     this.wsListeners.forEach(listener => listener(message));
-  }
-
-  // Webhook Simulation
-  async triggerWebhook(question: Question) {
-    console.log(`[WEBHOOK] Sending to ${this.webhookUrl}:`, {
-      event: 'question_answered',
-      question_id: question.question_id,
-      message: question.message,
-      timestamp: new Date().toISOString()
-    });
   }
 }
 
-export const backend = new MockBackend();
+export const backend = new Backend();

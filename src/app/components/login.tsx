@@ -7,7 +7,7 @@ export const LoginPage = ({ onLogin, onSwitchToRegister }: { onLogin: (user: Use
   const [password, setPassword] = useState<string>('');
   const [error, setError] = useState<string>('');
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError('');
     
     if (!username.trim() || !password.trim()) {
@@ -16,10 +16,10 @@ export const LoginPage = ({ onLogin, onSwitchToRegister }: { onLogin: (user: Use
     }
 
     try {
-      const user = backend.login(username, password);
+      const user = await backend.login(username, password);
       onLogin(user);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Login failed');
     }
   };
 

@@ -13,17 +13,23 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
   const [loadingAI, setLoadingAI] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
-    setQuestions(backend.getQuestions());
-
-    const unsubscribe = backend.addWebSocketListener((message) => {
-      if (message.type === 'new_question') {
-        setQuestions(backend.getQuestions());
-        if (user?.is_admin) {
-          showNotification('New question received!');
-        }
-      } else if (message.type === 'question_updated') {
-        setQuestions(backend.getQuestions());
+    const loadQuestions = async () => {
+      try {
+        const data = await backend.getQuestions();
+        setQuestions(data);
+      } catch (e) {
+        console.error("Failed to load questions");
       }
+    };
+    loadQuestions();
+
+    const unsubscribe = backend.addWebSocketListener(async (message) => {
+       // On any update, reload questions
+       // Optimization: if message contains data, we could use it, but safe to reload
+       await loadQuestions();
+       if (message.type === 'new_question' && user?.is_admin) {
+          showNotification('New question received!');
+       }
     });
 
     return unsubscribe;
@@ -45,53 +51,55 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
     return text.trim().length > 0;
   };
 
-  const handleSubmitQuestion = () => {
+  const handleSubmitQuestion = async () => {
     setError('');
     setSuccess('');
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/validate-question', true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
+    if (!validateQuestion(newQuestion)) {
+      setError('Question cannot be blank');
+      return;
+    }
 
-    xhr.onload = () => {
-      if (validateQuestion(newQuestion)) {
-        try {
-          backend.submitQuestion(newQuestion, user?.user_id);
-          setNewQuestion('');
-          setSuccess('Question submitted successfully!');
-          setTimeout(() => setSuccess(''), 3000);
-        } catch (err:any) {
-          setError(err.message);
-        }
-      } else {
-        setError('Question cannot be blank');
-      }
-    };
-
-    xhr.send(JSON.stringify({ question: newQuestion }));
+    try {
+      await backend.submitQuestion(newQuestion, user?.user_id);
+      setNewQuestion('');
+      setSuccess('Question submitted successfully!');
+      setTimeout(() => setSuccess(''), 3000);
+      // Refresh questions
+      const qs = await backend.getQuestions();
+      setQuestions(qs);
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit question');
+    }
   };
 
-  const handleMarkAnswered = (questionId: number) => {
+  const handleMarkAnswered = async (questionId: number) => {
     try {
-      backend.markAnswered(questionId);
+      await backend.markAnswered(questionId);
       setSuccess('Question marked as answered!');
       setTimeout(() => setSuccess(''), 3000);
+      // Refresh
+      const qs = await backend.getQuestions();
+      setQuestions(qs);
     } catch (err:any) {
       setError(err.message);
     }
   };
 
-  const handleEscalate = (questionId: number) => {
+  const handleEscalate = async (questionId: number) => {
     try {
-      backend.escalateQuestion(questionId);
+      await backend.escalateQuestion(questionId);
       setSuccess('Question escalated!');
       setTimeout(() => setSuccess(''), 3000);
+       // Refresh
+      const qs = await backend.getQuestions();
+      setQuestions(qs);
     } catch (err:any) {
       setError(err.message);
     }
   };
 
-  const handleAddAnswer = (questionId: number) => {
+  const handleAddAnswer = async (questionId: number) => {
     const answer = answerInputs[questionId];
     if (!answer?.trim()) {
       setError('Answer cannot be blank');
@@ -99,10 +107,13 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
     }
 
     try {
-      backend.addAnswer(questionId, answer, user?.user_id);
+      await backend.addAnswer(questionId, answer, user?.user_id);
       setAnswerInputs({ ...answerInputs, [questionId]: '' });
       setSuccess('Answer added!');
       setTimeout(() => setSuccess(''), 3000);
+      // Refresh
+      const qs = await backend.getQuestions();
+      setQuestions(qs);
     } catch (err:any) {
       setError(err.message);
     }
@@ -111,8 +122,20 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
   const handleGetAISuggestion = async (questionId: number, message: string) => {
     setLoadingAI({ ...loadingAI, [questionId]: true });
     try {
-      const suggestion = await backend.generateAISuggestion(message);
-      setAiSuggestions({ ...aiSuggestions, [questionId]: suggestion });
+      const result = await backend.generateAISuggestion(questionId);
+      
+      // If result is empty object (likely side-effect adding answer) or has no obvious text
+      if (!result || (typeof result === 'object' && Object.keys(result).length === 0)) {
+         // Reload questions to see if answer was added
+         const qs = await backend.getQuestions();
+         setQuestions(qs);
+         setSuccess('AI Suggestion generated!');
+         setTimeout(() => setSuccess(''), 3000);
+      } else {
+         // It returned some data, try to display it
+         const suggestionText = typeof result === 'string' ? result : (result.suggestion || result.message || JSON.stringify(result));
+         setAiSuggestions({ ...aiSuggestions, [questionId]: suggestionText });
+      }
     } catch (err) {
       setError('Failed to get AI suggestion');
     } finally {
