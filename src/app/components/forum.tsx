@@ -1,88 +1,82 @@
-import { useEffect, useState, useCallback } from "react";
-import { Question, backend } from "../utils/backend";
-import { AlertCircle, ArrowUp, CheckCircle, Clock, LogOut, MessageSquare, Send } from "lucide-react";
-import { User } from "../utils/backend";
+import { useEffect, useState } from "react";
+import { backend, Question, User } from "../utils/backend";
+import {
+  AlertCircle,
+  ArrowUp,
+  CheckCircle,
+  Clock,
+  LogOut,
+  MessageSquare,
+  Send,
+} from "lucide-react";
+import { useQuestions } from "../hooks/useQuestions";
 
-export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () => void }) => {
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [newQuestion, setNewQuestion] = useState<string>('');
-  const [error, setError] = useState<string>('');
-  const [success, setSuccess] = useState<string>('');  
+export const ForumPage = ({
+  user,
+  onLogout,
+}: {
+  user: User | null;
+  onLogout: () => void;
+}) => {
+  const {
+    questions,
+    loading: questionsLoading,
+    error: wsError,
+    refreshQuestions,
+  } = useQuestions();
+
+  const [newQuestion, setNewQuestion] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [answerInputs, setAnswerInputs] = useState<Record<number, string>>({});
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, string>>({});
   const [loadingAI, setLoadingAI] = useState<Record<number, boolean>>({});
 
-  const loadQuestions = useCallback(async () => {
-    try {
-      const data = await backend.getQuestions();
-      setQuestions(data);
-    } catch (e) {
-      console.error("Failed to load questions");
-    }
-  }, []);
-
-  useEffect(() => {
-    loadQuestions();
-
-    const unsubscribe = backend.addWebSocketListener(async (message) => {
-       // On any update, reload questions
-       // Optimization: if message contains data, we could use it, but safe to reload
-       await loadQuestions();
-       if (message.type === 'new_question' && user?.is_admin) {
-          showNotification('New question received!');
-       }
-    });
-
-    return unsubscribe;
-  }, [user, loadQuestions]);
-
-  const showNotification = (message :string) => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Q&A Dashboard', { body: message });
+  const showNotification = (message: string) => {
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("Q&A Dashboard", { body: message });
     }
   };
 
   useEffect(() => {
-    if (user?.is_admin && 'Notification' in window) {
+    if (user?.is_admin && "Notification" in window) {
       Notification.requestPermission();
     }
   }, [user]);
 
-  const validateQuestion = (text :string) => {
+  const validateQuestion = (text: string) => {
     return text.trim().length > 0;
   };
 
   const handleSubmitQuestion = async () => {
-    setError('');
-    setSuccess('');
+    setError("");
+    setSuccess("");
 
     if (!validateQuestion(newQuestion)) {
-      setError('Question cannot be blank');
+      setError("Question cannot be blank");
       return;
     }
 
     try {
       await backend.submitQuestion(newQuestion, user?.user_id);
-      setNewQuestion('');
-      setSuccess('Question submitted successfully!');
-      setTimeout(() => setSuccess(''), 3000);
-      // Refresh questions
-      const qs = await backend.getQuestions();
-      setQuestions(qs);
+      setNewQuestion("");
+      setSuccess("Question submitted successfully!");
+      setTimeout(() => setSuccess(""), 3000);
+
+      // ✅ WebSocket refresh instead of HTTP fetch
+      refreshQuestions();
     } catch (err: any) {
-      setError(err.message || 'Failed to submit question');
+      setError(err.message || "Failed to submit question");
     }
   };
 
   const handleMarkAnswered = async (questionId: number) => {
     try {
       await backend.markAnswered(questionId);
-      setSuccess('Question marked as answered!');
-      setTimeout(() => setSuccess(''), 3000);
-      // Refresh
-      const qs = await backend.getQuestions();
-      setQuestions(qs);
-    } catch (err:any) {
+      setSuccess("Question marked as answered!");
+      setTimeout(() => setSuccess(""), 3000);
+      refreshQuestions();
+    } catch (err: any) {
       setError(err.message);
     }
   };
@@ -90,12 +84,10 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
   const handleEscalate = async (questionId: number) => {
     try {
       await backend.escalateQuestion(questionId);
-      setSuccess('Question escalated!');
-      setTimeout(() => setSuccess(''), 3000);
-       // Refresh
-      const qs = await backend.getQuestions();
-      setQuestions(qs);
-    } catch (err:any) {
+      setSuccess("Question escalated!");
+      setTimeout(() => setSuccess(""), 3000);
+      refreshQuestions();
+    } catch (err: any) {
       setError(err.message);
     }
   };
@@ -103,78 +95,92 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
   const handleAddAnswer = async (questionId: number) => {
     const answer = answerInputs[questionId];
     if (!answer?.trim()) {
-      setError('Answer cannot be blank');
+      setError("Answer cannot be blank");
       return;
     }
 
     try {
       await backend.addAnswer(questionId, answer, user?.user_id);
-      setAnswerInputs({ ...answerInputs, [questionId]: '' });
-      setSuccess('Answer added!');
-      setTimeout(() => setSuccess(''), 3000);
-      // Refresh
-      const qs = await backend.getQuestions();
-      setQuestions(qs);
-    } catch (err:any) {
+      setAnswerInputs({ ...answerInputs, [questionId]: "" });
+      setSuccess("Answer added!");
+      setTimeout(() => setSuccess(""), 3000);
+
+      refreshQuestions();
+    } catch (err: any) {
       setError(err.message);
     }
   };
 
-  const handleGetAISuggestion = async (questionId: number, message: string) => {
+  const handleGetAISuggestion = async (questionId: number) => {
     setLoadingAI({ ...loadingAI, [questionId]: true });
     try {
       const result = await backend.generateAISuggestion(questionId);
-      
-      // If result is empty object (likely side-effect adding answer) or has no obvious text
-      if (!result || (typeof result === 'object' && Object.keys(result).length === 0)) {
-         // Reload questions to see if answer was added
-         const qs = await backend.getQuestions();
-         setQuestions(qs);
-         setSuccess('AI Suggestion generated!');
-         setTimeout(() => setSuccess(''), 3000);
+
+      if (
+        !result ||
+        (typeof result === "object" && Object.keys(result).length === 0)
+      ) {
+        refreshQuestions();
+        setSuccess("AI Suggestion generated!");
+        setTimeout(() => setSuccess(""), 3000);
       } else {
-         // It returned some data, try to display it
-         const suggestionText = typeof result === 'string' ? result : (result.suggestion || result.message || JSON.stringify(result));
-         setAiSuggestions({ ...aiSuggestions, [questionId]: suggestionText });
+        const suggestionText =
+          typeof result === "string"
+            ? result
+            : result.suggestion ||
+              result.message ||
+              JSON.stringify(result);
+        setAiSuggestions({ ...aiSuggestions, [questionId]: suggestionText });
       }
-    } catch (err) {
-      setError('Failed to get AI suggestion');
+    } catch {
+      setError("Failed to get AI suggestion");
     } finally {
       setLoadingAI({ ...loadingAI, [questionId]: false });
     }
   };
 
-  const formatTimestamp = (timestamp   :string) => {
+  const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleString();
   };
 
-  const getStatusColor = (status :string) => {
+  const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Pending': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'Escalated': return 'bg-red-100 text-red-800 border-red-300';
-      case 'Answered': return 'bg-green-100 text-green-800 border-green-300';
-      default: return 'bg-gray-100 text-gray-800 border-gray-300';
+      case "Pending":
+        return "bg-yellow-100 text-yellow-800 border-yellow-300";
+      case "Escalated":
+        return "bg-red-100 text-red-800 border-red-300";
+      case "Answered":
+        return "bg-green-100 text-green-800 border-green-300";
+      default:
+        return "bg-gray-100 text-gray-800 border-gray-300";
     }
   };
-  
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-8 h-8 text-indigo-600" />
-            <h1 className="text-2xl font-bold text-gray-800">Q&A Dashboard</h1>
+            <h1 className="text-2xl font-bold text-gray-800">
+              Q&A Dashboard
+            </h1>
           </div>
           <div className="flex items-center gap-4">
             {user ? (
               <>
                 <span className="text-sm text-gray-600">
-                  {user.username} {user.is_admin && <span className="text-indigo-600 font-semibold">(Admin)</span>}
+                  {user.username}
+                  {user.is_admin && (
+                    <span className="text-indigo-600 font-semibold">
+                      (Admin)
+                    </span>
+                  )}
                 </span>
                 <button
                   onClick={onLogout}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
                 >
                   <LogOut className="w-4 h-4" />
                   Logout
@@ -188,10 +194,10 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {error && (
+        {(error || wsError) && (
           <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg flex items-center gap-2">
             <AlertCircle className="w-5 h-5" />
-            {error}
+            {error || wsError}
           </div>
         )}
         {success && (
@@ -303,7 +309,7 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
                     Answer
                   </button>
                   <button
-                    onClick={() => handleGetAISuggestion(q.question_id, q.message)}
+                    onClick={() => handleGetAISuggestion(q.question_id)}
                     disabled={loadingAI[q.question_id]}
                     className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors text-sm disabled:opacity-50"
                   >
