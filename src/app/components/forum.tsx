@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Question, backend } from "../utils/backend";
 import { AlertCircle, ArrowUp, CheckCircle, Clock, LogOut, MessageSquare, Send } from "lucide-react";
 import { User } from "../utils/backend";
@@ -12,15 +12,16 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, string>>({});
   const [loadingAI, setLoadingAI] = useState<Record<number, boolean>>({});
 
+  const loadQuestions = useCallback(async () => {
+    try {
+      const data = await backend.getQuestions();
+      setQuestions(data);
+    } catch (e) {
+      console.error("Failed to load questions");
+    }
+  }, []);
+
   useEffect(() => {
-    const loadQuestions = async () => {
-      try {
-        const data = await backend.getQuestions();
-        setQuestions(data);
-      } catch (e) {
-        console.error("Failed to load questions");
-      }
-    };
     loadQuestions();
 
     const unsubscribe = backend.addWebSocketListener(async (message) => {
@@ -33,7 +34,7 @@ export const ForumPage = ({ user, onLogout }: { user: User | null; onLogout: () 
     });
 
     return unsubscribe;
-  }, [user]);
+  }, [user, loadQuestions]);
 
   const showNotification = (message :string) => {
     if ('Notification' in window && Notification.permission === 'granted') {

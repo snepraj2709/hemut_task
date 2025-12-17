@@ -29,7 +29,9 @@ class Backend {
   private pollingInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    let url = process.env.BACKEND_BASE_URL || 'http://13.203.220.208:8000';
+    // For static export (output: "export"), we need NEXT_PUBLIC_ prefix
+    // This gets embedded at build time
+    let url = process.env.NEXT_PUBLIC_BACKEND_BASE_URL || 'http://13.203.220.208:8000';
     // Sanitize URL: remove trailing slash if present
     if (url.endsWith('/')) {
       url = url.slice(0, -1);
