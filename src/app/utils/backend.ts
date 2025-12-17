@@ -60,6 +60,8 @@ class Backend {
     const url = `${this.baseUrl}${endpoint}`;
     const res = await fetch(url, {
       ...options,
+      mode: 'cors', // Explicit CORS mode for cross-origin requests
+      credentials: 'include', // Include credentials (cookies, auth headers)
       headers: {
         ...this.getHeaders(),
         ...options.headers,
