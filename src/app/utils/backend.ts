@@ -31,7 +31,7 @@ class Backend {
   constructor() {
     // For static export (output: "export"), we need NEXT_PUBLIC_ prefix
     // This gets embedded at build time
-    let url = process.env.NEXT_PUBLIC_BACKEND_BASE_URL || 'http://13.203.220.208:8000';
+    let url = process.env.NEXT_PUBLIC_BACKEND_BASE_URL || 'https://hemut-backend-xs3c.onrender.com';
     // Sanitize URL: remove trailing slash if present
     if (url.endsWith('/')) {
       url = url.slice(0, -1);
