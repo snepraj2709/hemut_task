@@ -3,8 +3,8 @@ import { User, backend } from "../utils/backend";
 import { AlertCircle, LogIn } from "lucide-react";
 
 export const LoginPage = ({ onLogin, onSwitchToRegister }: { onLogin: (user: User) => void; onSwitchToRegister: () => void }) => {
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
+  const [username, setUsername] = useState<string>('admin');
+  const [password, setPassword] = useState<string>('admin123');
   const [error, setError] = useState<string>('');
 
   const handleSubmit = async () => {

@@ -57,14 +57,14 @@ export default function Home() {
           onLogin={handleLogin}
           onSwitchToRegister={() => setCurrentPage('register')}
         />
-        <div className="fixed bottom-4 right-4">
+        {/* <div className="fixed bottom-4 right-4">
           <button
             onClick={handleGuestAccess}
             className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors shadow-lg"
           >
             Continue as Guest
           </button>
-        </div>
+        </div> */}
       </div>
     );
   }
