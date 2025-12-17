@@ -40,7 +40,7 @@ class Backend {
 
     // Load token from storage if available
     if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('access_token');
+      this.token = sessionStorage.getItem('access_token');
     }
   }
 
@@ -107,14 +107,14 @@ class Backend {
   logout() {
     this.token = null;
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
+      sessionStorage.removeItem('access_token');
     }
   }
 
   setToken(token: string) {
     this.token = token;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('access_token', token);
+      sessionStorage.setItem('access_token', token);
     }
   }
 

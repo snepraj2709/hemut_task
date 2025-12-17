@@ -1,7 +1,7 @@
 
 "use client";
-import { useState } from 'react';
-import { User } from './utils/backend';
+import { useState, useEffect } from 'react';
+import { User, backend } from './utils/backend';
 import RegisterPage from './components/register';
 import LoginPage from './components/login';
 import ForumPage from './components/forum';
@@ -9,6 +9,25 @@ import ForumPage from './components/forum';
 export default function Home() {
   const [currentPage, setCurrentPage] = useState('login');
   const [user, setUser] = useState<User | null>(null);
+  const [, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const userData = await backend.getUser();
+        if (userData) {
+          setUser(userData);
+          setCurrentPage('forum');
+        }
+      } catch (error) {
+        console.error('Session check failed:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkSession();
+  }, []);
 
   const handleLogin = (userData:User) => {
     setUser(userData);
@@ -21,6 +40,7 @@ export default function Home() {
   };
 
   const handleLogout = () => {
+    sessionStorage.removeItem("access_token");
     setUser(null);
     setCurrentPage('login');
   };

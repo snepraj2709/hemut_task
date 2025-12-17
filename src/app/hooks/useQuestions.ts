@@ -27,9 +27,9 @@ export function useQuestions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Get token from localStorage (only on client side)
+  // Get token from sessionStorage (only on client side)
   const token = useMemo(
-    () => (typeof window !== 'undefined' ? localStorage.getItem('token') : null),
+    () => (typeof window !== 'undefined' ? sessionStorage.getItem('access_token') : null),
     []
   );
 
